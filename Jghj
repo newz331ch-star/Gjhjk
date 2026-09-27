@@ -1,0 +1,216 @@
+-- [[ ระบบตรวจจับฟิสิกส์และสปอว์นลูกศรแดงชี้จุดตกบอลล่วงหน้านิ่งอยู่กับที่ ]] --
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ⚙️ ค่ากำหนดแกน Y พื้นสนาม (สคริปต์นี้จะสแกนพื้นให้อัตโนมัติ แต่ตั้งค่าสำรองไว้เผื่อหาไม่เจอ)
+local DEFAULT_FLOOR_HEIGHT = 0 
+local isPredictorEnabled = true
+
+----------------------------------------------------------------
+-- [ส่วนที่ 1: หน้าต่างเมนู GUI ควบคุมเปิด-ปิด]
+----------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BallPredictorMenu"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 100)
+mainFrame.Position = UDim2.new(0, 20, 0, 20)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Volleyball Predictor"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.Parent = mainFrame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 180, 0, 40)
+toggleButton.Position = UDim2.new(0.5, -90, 0.5, -5)
+toggleButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+toggleButton.Text = "สถานะ: เปิดใช้งาน"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 13
+toggleButton.Parent = mainFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = toggleButton
+
+local hintLabel = Instance.new("TextLabel")
+hintLabel.Size = UDim2.new(1, 0, 0, 20)
+hintLabel.Position = UDim2.new(0, 0, 1, -20)
+hintLabel.BackgroundTransparency = 1
+hintLabel.Text = "กดปุ่ม 'M' เพื่อซ่อน/แสดงเมนูนี้"
+hintLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+hintLabel.Font = Enum.Font.Gotham
+hintLabel.TextSize = 10
+hintLabel.Parent = mainFrame
+
+toggleButton.MouseButton1Click:Connect(function()
+	isPredictorEnabled = not isPredictorEnabled
+	if isPredictorEnabled then
+		toggleButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+		toggleButton.Text = "สถานะ: เปิดใช้งาน"
+	else
+		toggleButton.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+		toggleButton.Text = "สถานะ: ปิดใช้งาน"
+		local oldMarker = Workspace:FindFirstChild("BallLandingArrow")
+		if oldMarker then oldMarker:Destroy() end
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.M then
+		mainFrame.Visible = not mainFrame.Visible
+	end
+end)
+
+----------------------------------------------------------------
+-- [ส่วนที่ 2: ระบบสร้างลูกศร 3 มิติ นีออนสีแดงปักลงจากฟ้า]
+----------------------------------------------------------------
+local function spawnArrowMarker(position)
+	if not isPredictorEnabled then return end
+
+	local oldArrow = Workspace:FindFirstChild("BallLandingArrow")
+	if oldArrow then oldArrow:Destroy() end
+
+	local arrowModel = Instance.new("Model")
+	arrowModel.Name = "BallLandingArrow"
+
+	-- 1. ก้านลูกศร
+	local shaft = Instance.new("Part")
+	shaft.Name = "Shaft"
+	shaft.Shape = Enum.PartType.Cylinder
+	shaft.Size = Vector3.new(5, 0.5, 0.5)
+	shaft.Rotation = Vector3.new(0, 0, 90) -- ชี้ดิ่งลงพื้น
+	shaft.Position = position + Vector3.new(0, 5, 0) -- ลอยเหนือจุดตกเพื่อชี้ลงมา
+	shaft.Parent = arrowModel
+
+	-- 2. หัวลูกศร (ทรงกรวย 3 มิติ)
+	local cone = Instance.new("Part")
+	cone.Name = "Cone"
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.FileMesh
+	mesh.MeshId = "rbxassetid://1033717" -- รหัส Mesh ทรงกรวยสากลของ Roblox
+	mesh.Scale = Vector3.new(2, 2, 2.5)
+	mesh.Parent = cone
+	cone.Size = Vector3.new(2, 2.5, 2)
+	cone.Rotation = Vector3.new(180, 0, 0) -- คว่ำหัวลงดิน
+	cone.Position = position + Vector3.new(0, 1.25, 0)
+	cone.Parent = arrowModel
+
+	-- ตั้งค่าเอฟเฟกต์สีและฟิสิกส์ให้ลูกศรทั้งหมด
+	for _, part in pairs(arrowModel:GetChildren()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Material = Enum.Material.Neon
+			part.Color = Color3.fromRGB(255, 0, 0) -- สีแดงสดตามขอ
+			part.Transparency = 0.2
+		end
+	end
+
+	arrowModel.Parent = Workspace
+	Debris:AddItem(arrowModel, 3) -- ลบลูกศรทิ้งเองใน 3 วินาทีเมื่อจบรอบ
+end
+
+----------------------------------------------------------------
+-- [ส่วนที่ 3: ระบบดักวิถีโค้งฟิสิกส์ระดับสูง]
+----------------------------------------------------------------
+local function predictLanding(ball)
+	if not isPredictorEnabled then return end
+	
+	local startPos = ball.Position
+	local velocity = ball.AssemblyLinearVelocity
+	local gravity = Workspace.Gravity
+
+	-- ถ้าความเร็วต่ำเกินไป (บอลกลิ้งหรืออยู่นิ่ง) ปัดตกไม่ต้องคำนวณ
+	if velocity.Magnitude < 10 then return end
+
+	-- ใช้ Raycast ยิงลงดินตรวจหาความสูงพื้นสนามจริงแบบไดนามิก
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = {ball, arrowModel}
+	
+	local rayResult = Workspace:Raycast(startPos, Vector3.new(0, -500, 0), raycastParams)
+	local targetFloorY = rayResult and rayResult.Position.Y or DEFAULT_FLOOR_HEIGHT
+
+	-- ใช้สูตรวิถีโค้งพาราโบลาถอดเวลา (t)
+	local a = -0.5 * gravity
+	local b = velocity.Y
+	local c = startPos.Y - targetFloorY
+	
+	local discriminant = (b * b) - (4 * a * c)
+	
+	if discriminant >= 0 then
+		local t = (-b - math.sqrt(discriminant)) / (2 * a)
+		
+		-- ตรวจสอบขอบเขตเวลาว่าสัมพันธ์กับจังหวะการตี
+		if t > 0.02 and t < 5 then
+			local finalX = startPos.X + (velocity.X * t)
+			local finalZ = startPos.Z + (velocity.Z * t)
+			local landingPosition = Vector3.new(finalX, targetFloorY, finalZ)
+			
+			-- สั่งจุดลูกศรแดงลงที่ตำแหน่งนั้นทันที
+			spawnArrowMarker(landingPosition)
+		end
+	end
+end
+
+-- ฟังก์ชันเกาะจับลูกบอลและดักจับแรงปะทะใหม่ (ตรวจความถี่การเปลี่ยนทิศทางแบบ 3 มิติ)
+local function trackBall(obj)
+	-- ดักจับว่าตัวพาร์ทมีโอกาสเป็นลูกบอล (ทรงกลม หรือสัดส่วนเท่ากันทุกแกน)
+	if obj:IsA("BasePart") and (obj.Shape == Enum.PartType.Ball or (obj.Size.X == obj.Size.Y and obj.Size.Y == obj.Size.Z)) then
+		if obj.Name == "Terrain" or obj.Parent:IsA("Accessory") then return end
+		
+		local lastVelocity = obj.AssemblyLinearVelocity
+		
+		local connection
+		connection = obj:GetPropertyChangedSignal("Position"):Connect(function()
+			if not obj:IsDescendantOf(Workspace) then
+				connection:Disconnect()
+				return
+			end
+			
+			local currentVelocity = obj.AssemblyLinearVelocity
+			-- ตรวจหาแรงปะทะ (เมื่อเกิดการตบ, เสิร์ฟ, อันเดอร์ ความเร็วสะสมจะฉีกออกจากความเร็วเดิมกระทันหัน)
+			if (currentVelocity - lastVelocity).Magnitude > 15 then
+				RunService.Heartbeat:Wait() -- รอนิ่ง 1 เฟรมเพื่อให้เวกเตอร์ทิศทางจากเซิร์ฟเวอร์เสถียร
+				predictLanding(obj)
+			end
+			lastVelocity = currentVelocity
+		end)
+	end
+end
+
+-- ลูปรันสแกนดักจับวัตถุในสนามทันทีที่เปิดสคริปต์
+for _, obj in pairs(Workspace:GetDescendants()) do
+	trackBall(obj)
+end
+Workspace.DescendantAdded:Connect(trackBall)
+
+print("ระบบ Ultimate Arrow Predictor ใช้งานได้จริงแล้ว!")
